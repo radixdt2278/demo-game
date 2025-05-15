@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Airplane Adventure</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'Press Start 2P', cursive;
+            background-color: #87CEEB; /* Sky blue */
+            color: #fff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            width: 100%;
+            max-width: 800px; /* Max width for larger screens */
+            aspect-ratio: 16 / 9; /* Maintain aspect ratio */
+            position: relative;
+            border-radius: 15px;
+            overflow: hidden; /* Ensure canvas corners are rounded if canvas itself isn't */
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
+        }
+        canvas {
+            display: block;
+            width: 100% !important; /* Override three.js inline style */
+            height: 100% !important; /* Override three.js inline style */
+            border-radius: 15px;
+        }
+        #ui-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            pointer-events: none; /* Allow mouse events to pass through to canvas */
+        }
+        #score {
+            font-size: 24px;
+            color: #FFFF00; /* Yellow */
+            text-shadow: 2px 2px #000;
+            padding: 20px;
+            align-self: flex-start;
+        }
+        #message-box {
+            display: none; /* Hidden by default */
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0, 0, 0, 0.75);
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            pointer-events: all; /* Enable pointer events for message box */
+        }
+        #message-box h2 {
+            font-size: 28px;
+            margin-bottom: 15px;
+            color: #FF6347; /* Tomato red */
+        }
+        #message-box p {
+            font-size: 18px;
+            margin-bottom: 25px;
+        }
+        .game-button {
+            font-family: 'Press Start 2P', cursive;
+            background: linear-gradient(145deg, #ff8a00, #e52e71);
+            border: none;
+            color: white;
+            padding: 15px 30px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 8px;
+            box-shadow: 0 5px #999;
+            transition: all 0.1s ease-in-out;
+        }
+        .game-button:hover {
+            background: linear-gradient(145deg, #ff9b1f, #f23f7f);
+            box-shadow: 0 7px #777;
+            transform: translateY(-2px);
+        }
+        .game-button:active {
+            background: linear-gradient(145deg, #e07a00, #c21e56);
+            box-shadow: 0 2px #555;
+            transform: translateY(2px);
+        }
+        #start-screen {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(0, 0, 0, 0.85);
+            position: absolute;
+            top:0; left:0; right:0; bottom:0;
+            z-index: 10;
+            pointer-events: all;
+        }
+        #start-screen h1 {
+            font-size: 36px;
+            color: #4CAF50; /* Green */
+            margin-bottom: 10px;
+        }
+        #start-screen p {
+            font-size: 16px;
+            margin-bottom: 30px;
+            max-width: 80%;
+            text-align: center;
+        }
+
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <div id="ui-container">
+            <div id="score">Score: 0</div>
+            <div id="message-box">
+                <h2 id="message-title">Game Over!</h2>
+                <p id="message-text">Your final score is: 0</p>
+                <button id="restart-button" class="game-button">Restart Game</button>
+            </div>
+        </div>
+        <div id="start-screen">
+            <h1>3D Airplane Adventure</h1>
+            <p>Control the plane with your mouse. Collect yellow coins and avoid red obstacles!</p>
+            <button id="start-button" class="game-button">Start Game</button>
+        </div>
+        </div>
+
+    <script>
+        // --- Global Variables ---
+        let scene, camera, renderer;
+        let airplane, airplaneBoundingBox;
+        let coins = [];
+        let obstacles = [];
+        let score = 0;
+        let gameSpeed = 0.1;
+        let baseGameSpeed = 0.1;
+        let maxGameSpeed = 0.3;
+        let gameSpeedIncreaseFactor = 0.0001;
+        let gameRunning = false;
+        let mouseX = 0, mouseY = 0;
+        let targetAirplaneX = 0, targetAirplaneY = 0;
+
+        const gameBounds = { x: 8, y: 4.5, zFar: -50 }; // Approximate visual bounds for player movement
+
+        // DOM Elements
+        const scoreElement = document.getElementById('score');
+        const messageBoxElement = document.getElementById('message-box');
+        const messageTitleElement = document.getElementById('message-title');
+        const messageTextElement = document.getElementById('message-text');
+        const restartButton = document.getElementById('restart-button');
+        const startButton = document.getElementById('start-button');
+        const startScreenElement = document.getElementById('start-screen');
+        const gameContainer = document.getElementById('game-container');
+
+        // --- Initialization ---
+        function init() {
+            // Scene
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x87CEEB); // Sky blue
+            scene.fog = new THREE.Fog(0x87CEEB, 20, 70); // Fog for depth
+
+            // Camera
+            const aspect = gameContainer.clientWidth / gameContainer.clientHeight;
+            camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
+            camera.position.set(0, 2, 10); // Positioned slightly above and behind where plane will be
+            camera.lookAt(0,0,0);
+
+            // Renderer
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(gameContainer.clientWidth, gameContainer.clientHeight);
+            renderer.shadowMap.enabled = true; // Enable shadows
+            gameContainer.appendChild(renderer.domElement);
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 20, 10);
+            directionalLight.castShadow = true;
+            directionalLight.shadow.mapSize.width = 1024;
+            directionalLight.shadow.mapSize.height = 1024;
+            directionalLight.shadow.camera.near = 0.5;
+            directionalLight.shadow.camera.far = 50;
+            directionalLight.shadow.camera.left = -20;
+            directionalLight.shadow.camera.right = 20;
+            directionalLight.shadow.camera.top = 20;
+            directionalLight.shadow.camera.bottom = -20;
+            scene.add(directionalLight);
+
+            // Ground (optional, decorative)
+            const groundGeometry = new THREE.PlaneGeometry(100, 100);
+            const groundMaterial = new THREE.MeshLambertMaterial({ color: 0x228B22 }); // Forest green
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.y = -5; // Position below the action
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            // Create Airplane
+            createAirplane();
+
+            // Event Listeners
+            document.addEventListener('mousemove', onMouseMove, false);
+            restartButton.addEventListener('click', restartGame);
+            startButton.addEventListener('click', startGame);
+            window.addEventListener('resize', onWindowResize, false);
+
+            // Initial UI setup
+            scoreElement.textContent = `Score: ${score}`;
+            messageBoxElement.style.display = 'none';
+            startScreenElement.style.display = 'flex';
+        }
+
+        // --- Game Object Creation ---
+        function createAirplane() {
+            // Main body (fuselage)
+            const fuselageGeometry = new THREE.BoxGeometry(1, 0.8, 2.5); // width, height, depth
+            const fuselageMaterial = new THREE.MeshLambertMaterial({ color: 0x708090 }); // Slate gray
+            airplane = new THREE.Mesh(fuselageGeometry, fuselageMaterial);
+            airplane.castShadow = true;
+            airplane.position.set(0, 0, 0); // Initial position
+
+            // Wings
+            const wingGeometry = new THREE.BoxGeometry(4, 0.2, 1);
+            const wingMaterial = new THREE.MeshLambertMaterial({ color: 0xD3D3D3 }); // Light gray
+            const leftWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            leftWing.position.set(-2.5, 0, 0); // x, y, z relative to fuselage center
+            leftWing.castShadow = true;
+            airplane.add(leftWing);
+
+            const rightWing = new THREE.Mesh(wingGeometry, wingMaterial);
+            rightWing.position.set(2.5, 0, 0);
+            rightWing.castShadow = true;
+            airplane.add(rightWing);
+
+            // Tail wing (horizontal stabilizer)
+            const tailWingGeometry = new THREE.BoxGeometry(1.5, 0.15, 0.6);
+            const tailWing = new THREE.Mesh(tailWingGeometry, wingMaterial);
+            tailWing.position.set(0, 0.2, -1.2); // y slightly up, z to the back
+            tailWing.castShadow = true;
+            airplane.add(tailWing);
+
+            // Tail fin (vertical stabilizer)
+            const tailFinGeometry = new THREE.BoxGeometry(0.15, 0.8, 0.6);
+            const tailFin = new THREE.Mesh(tailFinGeometry, wingMaterial);
+            tailFin.position.set(0, 0.6, -1.2); // y up, z to the back
+            tailFin.castShadow = true;
+            airplane.add(tailFin);
+
+            // Cockpit
+            const cockpitGeometry = new THREE.BoxGeometry(0.6, 0.5, 0.7);
+            const cockpitMaterial = new THREE.MeshLambertMaterial({ color: 0xADD8E6, transparent: true, opacity: 0.7 }); // Light blue, semi-transparent
+            const cockpit = new THREE.Mesh(cockpitGeometry, cockpitMaterial);
+            cockpit.position.set(0, 0.45, 0.6); // y slightly above fuselage, z to the front
+            airplane.add(cockpit);
+
+            scene.add(airplane);
+            airplaneBoundingBox = new THREE.Box3().setFromObject(airplane);
+        }
+
+        function createCoin() {
+            const coinGeometry = new THREE.CylinderGeometry(0.5, 0.5, 0.2, 16); // radiusTop, radiusBottom, height, radialSegments
+            const coinMaterial = new THREE.MeshLambertMaterial({ color: 0xFFFF00 }); // Yellow
+            const coin = new THREE.Mesh(coinGeometry, coinMaterial);
+            coin.rotation.x = Math.PI / 2; // Lay flat
+            coin.castShadow = true;
+
+            // Spawn ahead of the player, within game bounds
+            coin.position.set(
+                THREE.MathUtils.randFloat(-gameBounds.x, gameBounds.x),
+                THREE.MathUtils.randFloat(-gameBounds.y + 1, gameBounds.y + 1), // Keep slightly above ground level
+                gameBounds.zFar - THREE.MathUtils.randFloat(0, 20) // Spawn at varying depths
+            );
+            coin.userData = { type: 'coin', boundingBox: new THREE.Box3().setFromObject(coin) };
+            coins.push(coin);
+            scene.add(coin);
+        }
+
+        function createObstacle() {
+            const obstacleSize = THREE.MathUtils.randFloat(0.8, 1.5);
+            const obstacleGeometry = new THREE.BoxGeometry(obstacleSize, obstacleSize, obstacleSize);
+            const obstacleMaterial = new THREE.MeshLambertMaterial({ color: 0xFF0000 }); // Red
+            const obstacle = new THREE.Mesh(obstacleGeometry, obstacleMaterial);
+            obstacle.castShadow = true;
+
+            obstacle.position.set(
+                THREE.MathUtils.randFloat(-gameBounds.x, gameBounds.x),
+                THREE.MathUtils.randFloat(-gameBounds.y + 1, gameBounds.y + 1),
+                gameBounds.zFar - THREE.MathUtils.randFloat(0, 30)
+            );
+            obstacle.userData = { type: 'obstacle', boundingBox: new THREE.Box3().setFromObject(obstacle) };
+            obstacles.push(obstacle);
+            scene.add(obstacle);
+        }
+
+        // --- Game Logic ---
+        function updateGameObjects() {
+            // Move coins
+            coins.forEach((coin, index) => {
+                coin.position.z += gameSpeed;
+                coin.rotation.y += 0.05; // Make them spin
+                coin.userData.boundingBox.setFromObject(coin); // Update bounding box
+
+                if (coin.position.z > camera.position.z + 5) { // If coin passed player
+                    scene.remove(coin);
+                    coins.splice(index, 1);
+                }
+            });
+
+            // Move obstacles
+            obstacles.forEach((obstacle, index) => {
+                obstacle.position.z += gameSpeed;
+                obstacle.rotation.x += 0.01;
+                obstacle.rotation.y += 0.01;
+                obstacle.userData.boundingBox.setFromObject(obstacle); // Update bounding box
+
+                if (obstacle.position.z > camera.position.z + 5) { // If obstacle passed player
+                    scene.remove(obstacle);
+                    obstacles.splice(index, 1);
+                }
+            });
+
+            // Spawn new items
+            if (Math.random() < 0.025 && coins.length < 15) { // Control spawn rate and max items
+                createCoin();
+            }
+            if (Math.random() < 0.015 && obstacles.length < 10) {
+                createObstacle();
+            }
+
+            // Update airplane position smoothly
+            airplane.position.x += (targetAirplaneX - airplane.position.x) * 0.1;
+            airplane.position.y += (targetAirplaneY - airplane.position.y) * 0.1;
+
+            // Tilt airplane based on horizontal movement
+            airplane.rotation.z = (targetAirplaneX - airplane.position.x) * -0.1;
+             // Bank airplane based on vertical movement
+            airplane.rotation.x = (targetAirplaneY - airplane.position.y) * 0.05;
+
+
+            airplaneBoundingBox.setFromObject(airplane);
+
+            // Collision detection
+            checkCollisions();
+
+            // Increase game speed over time
+            if (gameSpeed < maxGameSpeed) {
+                gameSpeed += gameSpeedIncreaseFactor;
+            }
+        }
+
+        function checkCollisions() {
+            // Airplane vs Coins
+            coins.forEach((coin, index) => {
+                if (airplaneBoundingBox.intersectsBox(coin.userData.boundingBox)) {
+                    scene.remove(coin);
+                    coins.splice(index, 1);
+                    score++;
+                    scoreElement.textContent = `Score: ${score}`;
+                    // Optional: Add a sound effect here using Tone.js if desired
+                }
+            });
+
+            // Airplane vs Obstacles
+            obstacles.forEach((obstacle) => {
+                if (airplaneBoundingBox.intersectsBox(obstacle.userData.boundingBox)) {
+                    gameOver();
+                }
+            });
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            messageTitleElement.textContent = "Game Over!";
+            messageTextElement.textContent = `Your final score is: ${score}`;
+            messageBoxElement.style.display = 'flex';
+            // Optional: Stop any game sounds
+        }
+
+        function resetGame() {
+            score = 0;
+            gameSpeed = baseGameSpeed;
+            scoreElement.textContent = `Score: ${score}`;
+
+            // Remove all coins and obstacles from scene and arrays
+            coins.forEach(coin => scene.remove(coin));
+            coins = [];
+            obstacles.forEach(obstacle => scene.remove(obstacle));
+            obstacles = [];
+
+            // Reset airplane position
+            airplane.position.set(0, 0, 0);
+            targetAirplaneX = 0;
+            targetAirplaneY = 0;
+            airplane.rotation.set(0,0,0);
+
+
+            // Clear any existing spawn timers if they were used
+        }
+
+        function startGame() {
+            startScreenElement.style.display = 'none';
+            messageBoxElement.style.display = 'none';
+            resetGame();
+            gameRunning = true;
+            if (!animationFrameId) { // Ensure loop doesn't start multiple times
+                animate();
+            }
+        }
+
+        function restartGame() {
+            messageBoxElement.style.display = 'none';
+            resetGame();
+            gameRunning = true;
+            // No need to call animate() here if it's already potentially running or if startGame handles it
+            // If animate() stops on game over, then it needs to be restarted.
+            // Current setup: animate() continues but updateGameObjects() is skipped if !gameRunning
+            // So, simply setting gameRunning = true is enough.
+        }
+
+
+        // --- Event Handlers ---
+        function onMouseMove(event) {
+            // Calculate mouse position in normalized device coordinates (-1 to +1) for both axes
+            const rect = gameContainer.getBoundingClientRect();
+            mouseX = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            mouseY = -((event.clientY - rect.top) / rect.height) * 2 + 1; // Y is inverted
+
+            // Map mouse position to game world coordinates for the airplane
+            // Adjust sensitivity by changing the multiplier (gameBounds.x and gameBounds.y)
+            targetAirplaneX = mouseX * gameBounds.x;
+            targetAirplaneY = mouseY * gameBounds.y;
+
+            // Clamp airplane position to stay within defined bounds
+            targetAirplaneX = Math.max(-gameBounds.x, Math.min(gameBounds.x, targetAirplaneX));
+            targetAirplaneY = Math.max(-gameBounds.y, Math.min(gameBounds.y, targetAirplaneY));
+        }
+
+        function onWindowResize() {
+            const newWidth = gameContainer.clientWidth;
+            const newHeight = gameContainer.clientHeight;
+
+            camera.aspect = newWidth / newHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(newWidth, newHeight);
+        }
+
+        // --- Animation Loop ---
+        let animationFrameId;
+        function animate() {
+            animationFrameId = requestAnimationFrame(animate);
+
+            if (gameRunning) {
+                updateGameObjects();
+            }
+
+            renderer.render(scene, camera);
+        }
+
+        // --- Start ---
+        window.onload = function() {
+            init();
+            // Don't start game loop (animate) until user clicks start
+            // The animate() function will be called by startGame()
+        };
+
+    </script>
+</body>
+</html>
